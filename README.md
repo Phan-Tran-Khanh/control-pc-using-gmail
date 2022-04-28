@@ -9,6 +9,7 @@ Remote control personal computer using Gmail API
 * Kill a process: KILL PROCESS - [process name]
 * Getting input keyboard: CATCH KEYS - [number of seconds]
 * Registry entry:
+
 **MUST INCLUDE SECRET KEY IN CONTEXT**: *019250304*
 ## RESPONSE format: Subject - Context
 * Shutdown: SHUTDOWN - "The computer is shut down."
