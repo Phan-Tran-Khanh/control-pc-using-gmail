@@ -5,6 +5,7 @@ Remote control personal computer using Gmail API
 * Restart: RESTART - [time format hh:mm:ss]
 * Copy file: COPY FILE - [file path] \n [destination path]
 * Capture screen: CAPTURE - [anything or blank]
+* Capture webcam:
 * List running processes: RUNNING PROCESSES - [anything or blank]
 * Kill a process: KILL PROCESS - [process name]
 * Getting input keyboard: CATCH KEYS - [number of seconds]
@@ -16,6 +17,7 @@ Remote control personal computer using Gmail API
 * Restart: RESTART - "The computer is restarted."
 * Copy file: COPY FILE - [new file path]
 * Capture screen: CAPTURE - [embed screen image]
+* Capture webcam:
 * List running processes: RUNNING PROCESSES - [a list of processes' name]
 * Kill a process: KILL PROCESS - [successful / failed (included failed message if possible)]
 * Getting input keyboard: CATCH KEYS - [keys input]
