@@ -1,6 +1,4 @@
 # import the required libraries
-from ast import Raise
-from email import message
 import mimetypes
 from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
@@ -8,8 +6,6 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import shutil
-from turtle import shape
-from urllib import response
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -19,17 +15,20 @@ import base64
 import email
 from bs4 import BeautifulSoup	# to decode email body
 import os
-import time
 import datetime
+import pandas as pd
 from tkinter import *
 from tkinter import messagebox
-from numpy import take
-from psutil import users
 import pyautogui	# to take screenshot
+import psutil	# to get running processes
 
 SECRET_KEY = '019250304'
 SOFTWARE_NAME = 'PC Remote Control Using Email'
-SCREENSHOT_PATH = './Screenshot'
+TEMPORARY_FILES_PATH = '.\Temporary'
+
+# Create a folder for temporary files
+if not os.path.isdir(TEMPORARY_FILES_PATH):
+	os.makedirs(TEMPORARY_FILES_PATH)
 
 # if you modify this SCOPES, you need to delete file token.pickle first
 # unless the code will not run
@@ -54,6 +53,9 @@ if not creds or not creds.valid:
 
 # Connect to the Gmail API
 gmail = build('gmail', 'v1', credentials=creds)
+print('SUCCESS: Connected to Gmail service')
+
+auth_email_address = gmail.users().getProfile(userId = 'me').execute()['emailAddress']
 
 # this function reads the latest unread email, and marks it as read
 def read_email():
@@ -117,7 +119,7 @@ def read_email():
 		
 		# Check secret key
 		if body.find(SECRET_KEY) == -1:
-			raise Exception('Secret Key not found')
+			return None, 'Secret key not found!'
 		
 		email = {'subject':subject, 'sender':sender, 'context':body}
 		
@@ -128,33 +130,13 @@ def read_email():
 			body = {'removeLabelIds': ['UNREAD']}
 		).execute()
 
+		print('SUCCESS: Got a new request email [{}].'.format(subject))
 		return email, "No Error"
 
 	except Exception as error:
-		err_message = 'Oops!\nAn error occurred while getting email!\n' + str(error)
+		err_message = 'An error occurred while getting email!\n' + str(error)
+		print('FAILED: ' + err_message)
 		return None, err_message
-
-def create_message(sender, to, subject, message_text):
-	'''
-	This function create a message for an email.
-	----------------------------------
-	PARAMS:
-	___sender: dtype = str, representing the email address of the sender.
-	___to: dtype = str, representing the email address of the receiver.
-	___subject: dtype = str, representing the subject of the email.
-	___message_text: dtype = str, representing the context of email.
-	----------------------------------
-	RETURNS:
-	___A dictionary with keys {'raw'} contains the decoded raw data of email body.
-	'''
-	message = MIMEText(message_text)
-	message['to'] = to
-	message['from'] = sender
-	message['subject'] = subject
-	raw_message = base64.urlsafe_b64encode(message.as_string().encode("utf-8"))
-	return {
-		'raw': raw_message.decode("utf-8")
-	} 
 
 def build_file_part(file):
 	'''
@@ -194,63 +176,74 @@ def build_file_part(file):
 
 		filename = os.path.basename(file)
 		msg.add_header('Content-Disposition', 'attachment', filename=filename)
+		
+		print('SUCCESS: File part has been built, content type = {}'.format(content_type))
 		return msg
 
 	except Exception as err:
-		messagebox.showwarning(SOFTWARE_NAME, 'Built Email Body Failed: ' + str(err))
+		print('FAILED: Build file part unsuccessful: ' + str(err))
+		messagebox.showwarning(SOFTWARE_NAME, 'Build File Part Failed: ' + str(err))
 
-def create_email_with_attachment(sender = str, to = str, subject = str, text = str, attachment_path = str):
+def create_email(sender = str, receiver = str, subject = str, text = str, attachment_path = None | str):
 	'''
-	Create Email with attachment.
-	-------------
+	Create an email.
+	-------
 	PARAMS:
-	___sender (dtype = str): email address of sender.
-	___to (dtype = str): email address of receiver.
-	___subject (dtype = str): subject of email.
-	___text (dtype = str): text content of email.
-	___attachment_path (dtype = str): path to attachment file.
-	-------------
+	___sender (dtype = str): email address of the sender.
+	___receiver (dtype = str): email address of the receiver.
+	___subject (dtype = str): subject of the email.
+	___text (dtype = str): text part of the email.
+	___attachment_path (dtype = str or None): Optional, is the path to attachment file.
+	-------
 	RETURNS:
-	No returns.
+	The raw body data of the email.
 	'''
 	try:
 		mime_message = MIMEMultipart()
-		mime_message['To'] = to
+
+		mime_message['To'] = receiver
 		mime_message['From'] = sender
 		mime_message['Subject'] = subject
+
 		text_part = MIMEText(text)
 		mime_message.attach(text_part)
-		attachment = build_file_part(file = attachment_path)
-		mime_message.attach(attachment)
-		encoded_message = base64.urlsafe_b64encode(mime_message.as_bytes()).decode()
+
+		if attachment_path != None:
+			attachment = build_file_part(file = attachment_path)
+			mime_message.attach(attachment)
+		
+		encoded_message = base64.urlsafe_b64encode(mime_message.as_string().encode('utf-8'))
+		print('SUCCESS: An email has been created.')
 		return {
-			'raw': encoded_message
+			'raw': encoded_message.decode('utf-8')
 		}
 	except Exception as err:
-		messagebox.showwarning(SOFTWARE_NAME, 'Create email with attachment failed: ' + str(err))
+		print('FAILED: Create email unsuccessfull: ' + str(err))
+		messagebox.showwarning(SOFTWARE_NAME, 'Create email failed: ' + str(err))
 
-def send_message(service, user_id, message):
+
+def send_email(service, user_id, body):
 	'''
 	Send an email.
 	---------------------------------
 	PARAMS:
 	___service: the Gmail service object.
 	___user_id: dtype = str, The user's email address. The special value 'me' can be used to indicate the authenticated user.
-	___message: dtype = dict, the raw data of email body.
+	___body: dtype = dict, the raw data of email body.
 	---------------------------------
 	RETURNS:
 	___message: dtype = dict, contains info about the successfully sent email.
 	___None: send email failed.
 	'''
 	try:
-		message = service.users().messages().send(userId=user_id, body=message).execute()
+		message = service.users().messages().send(userId=user_id, body=body).execute()
+		print('SUCCESS: Sent an email.')
 		return message
 	except Exception as e:
+		print('FAILED: Send email unsuccessfull: ' + str(e))
 		messagebox.showerror(SOFTWARE_NAME, 'Send Email Failed: ' + str(e))
 		return None
 
-
-# function parse a string of time [hh:mm:ss] to a datetime object
 def time_parser(time_string):
 	'''
 	This function parse a string of time into a datetime object.
@@ -275,7 +268,6 @@ def time_parser(time_string):
 	except Exception as err:
 		return None, str(err)
 
-# function restart pc at a specific time
 def restart(time_str):
 	'''
 	This function restart the pc.
@@ -314,10 +306,12 @@ def restart(time_str):
 			messagebox.showinfo(SOFTWARE_NAME, 'RESTART SCHEDULE CANCELED')
 			raise Exception('PC\'s current user refused to restart at ' + time_str)
 		else:
+			print('SUCCESS: Scheduled to restart this PC at {}.'.format(time_str))
 			return True, "No error"
 
 	except Exception as error:
 		err_message = str(error)
+		print('FAILED: Schedule restart failed: ' + err_message)
 		return None, err_message
 
 def shutdown(time_str=str):
@@ -361,10 +355,30 @@ def shutdown(time_str=str):
 			raise Exception('Current PC\'s user refused to shutdown at ' + time_str)
 		else:
 			# User accepted the shutdown schedule.
+			print('SUCCESS: Scheduled to shutdown this PC at {}.'.format(time_str))
 			return True, "No Error"
 
 	except Exception as err:
+		print('FAILED: schedule shutdown failed: ' + str(err))
 		return None, str(err)
+
+def get_sender_address(email):
+	'''
+	Get email address of sender.
+	---------
+	PARAMS:
+	___email (dtype = dict): contains 3 keys {'sender', 'subject', 'context'}
+	---------
+	RETURNS:
+	___None: error occurred.
+	___Email address of email's sender (dtype = str): no error occurred.
+	'''
+	try:
+		email_address = email['sender'].replace('<','').replace('>','').split(' ')[-1]
+		return email_address
+	except Exception:
+		print('FAILED: Can\'t get sender\'s email address')
+		return None
 
 def do_restart_request(email):
 	'''
@@ -387,17 +401,17 @@ def do_restart_request(email):
 			msg_content = 'Restart FAILED\nInfo: ' + err_message
 		else:
 			msg_content = 'The computer is scheduled to restart at ' + time
-		
-		sender_mail = email['sender'].replace('<','').replace('>','').split(' ')[-1]
 
-		response_context = create_message (
-			sender = gmail.users().getProfile(userId='me').execute()['emailAddress'],
-			to = sender_mail,
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
 			subject = 'RESTART',
-			message_text = msg_content
+			text = msg_content,
+			attachment_path = None
 		)
 
-		send_message(gmail, 'me', response_context)
+		send_email(gmail, 'me', response)
+		print('SUCCESS: RESTART request email has been successfully executed.')
 	
 	except Exception as error:
 		err_msg = 'RESTART SCHEDULE FAILED\n' + str(error)
@@ -423,14 +437,16 @@ def do_shutdown_request(email):
 		else:
 			msg_text = 'The computer is scheduled to shutdown at ' + time
 		
-		response = create_message (
-			sender = gmail.users().getProfile(userId='me').execute()['emailAddress'],
-			to = email['sender'].replace('<','').replace('>','').split(' ')[-1],
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
 			subject = 'SHUTDOWN',
-			message_text = msg_text
+			text = msg_text,
+			attachment_path = None
 		)
 
-		send_message(gmail, 'me', response)
+		send_email(gmail, 'me', response)
+		print('SUCCESS: SHUTDOWN request email has been successfully executed.')
 
 	except Exception as err:
 		err_msg = 'SHUTDOWN SCHEDULE FAILED\n' + str(err)
@@ -460,9 +476,11 @@ def copy_file(src_path, dest_path):
 			os.makedirs(os.path.dirname(dest_path))
 			result_path = shutil.copy(src_path, dest_path)
 		
+		print('SUCCESS: Copied file {} to {}'.format(src_path, result_path))
 		return True, result_path
 
 	except Exception as err:
+		print("FAILED: can't copy file: " + str(err))
 		return None, str(err)
 
 def do_copy_request(email):
@@ -488,14 +506,16 @@ def do_copy_request(email):
 		else:
 			msg_text = msg
 		
-		response = create_message (
-			sender = gmail.users().getProfile(userId = 'me').execute()['emailAddress'],
-			to = email['sender'].replace('<','').replace('>','').split(' ')[-1],
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
 			subject = 'COPY FILE',
-			message_text = msg_text
+			text = msg_text,
+			attachment_path = None
 		)
 
-		send_message(gmail, 'me', response)
+		send_email(gmail, 'me', response)
+		print('SUCCESS: COPY request email has been successfully executed.')
 
 	except Exception as err:
 		err_msg = 'COPY FILE FAILED\n' + str(err)
@@ -521,14 +541,16 @@ def take_screenshot(save_dir = str):
 			os.makedirs(save_dir)
 
 		# File name is screenshot time.png
-		file_name = str(datetime.datetime.now().strftime('%d-%m-%Y-%H-%M-%S.png'))
+		file_name = str(datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][screenshot].png'))
 		save_path = os.path.join(save_dir, file_name)
 
 		sc.save(save_path)
 
+		print('SUCCESS: Screenshot taken.')
 		return True, save_path
 
 	except Exception as err:
+		print("FAILED: Can't take screenshot: " + str(err))
 		return None, str(err)
 
 def do_capture_request(email):
@@ -542,37 +564,197 @@ def do_capture_request(email):
 	No returns.
 	'''
 	try:
-		sc, msg = take_screenshot(save_dir = SCREENSHOT_PATH)
+		sc, msg = take_screenshot(save_dir = TEMPORARY_FILES_PATH)
 		
-		# Send response email
-		sender = gmail.users().getProfile(userId = 'me').execute()['emailAddress']
-		receiver = email['sender'].replace('<','').replace('>','').split(' ')[-1]
-		subject = 'CAPTURE'
-
+		# Send response email		
 		if sc == None:
-			response = create_message (
-				sender = sender,
-				to = receiver,
-				subject = subject,
-				message_text = 'Take screenshot failed\nInfo: ' + msg
-			)
+			text = 'Take screenshot failed\nInfo: ' + msg
+			screenshot_path = None
 		else:
-			response = create_email_with_attachment (
-				sender = sender,
-				to = receiver,
-				subject = subject,
-				text = '',
-				attachment_path = msg 
-			)
-		
-		send_message (
-			service = gmail,
-			user_id = 'me',
-			message = response
+			text = ''
+			screenshot_path = msg
+
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
+			subject = 'CAPTURE',
+			text = text,
+			attachment_path = screenshot_path
 		)
+
+		if sc != None:
+			os.remove(screenshot_path)
+
+		send_email(gmail, 'me', response)
+		print('SUCCESS: CAPTURE request email has been executed.')
 
 	except Exception as err:
 		messagebox.showwarning(SOFTWARE_NAME, 'SCREEN CAPTURE FAILED\n' + str(err))
+
+def list_processes():
+	'''
+	Get list of running processes.
+	--------------
+	PARAMS:
+	No params
+	--------------
+	RETURNS:
+	___data, 'No error' (dtype = dict, str): data contains 3 keys = name, id and num_of_thread.
+	___None, err_message (dtype = None, str): if any error occurred.
+	'''
+	try:
+		names = list()
+		IDs = list()
+		num_of_threads = list()
+
+		for proc in psutil.process_iter():
+			try:
+				# Get process name, pid, number of threads from process object.
+				name = proc.name()
+				pid = proc.pid
+				threads = proc.num_threads()
+				names.append(str(name))
+				IDs.append(str(pid))
+				num_of_threads.append(str(threads))
+			except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+				pass
+
+		data = {
+			'name' : names,
+			'id' : IDs,
+			'num_of_thread' : num_of_threads
+		}
+		print('SUCCESS: Got list of running processes.')
+		return data, 'No error'
+
+	except Exception as err:
+		print("FAILED: Can't get running processes list: " + str(err))
+		return None, str(err)
+
+def do_running_process_request(email):
+	'''
+	Execute the RUNNING PROCESSES request email.
+	----------------
+	PARAMS:
+	___email (dtype = dict): the request email. Must contains key 'sender'
+	----------------
+	RETURNS:
+	None.
+	'''
+	try:
+		running_processes, msg = list_processes()
+
+		if running_processes == None:
+			# If get running processes failed, send a response email
+			# with error message.
+			text = 'LIST RUNNING PROCESSES FAILED\nInfo: ' + msg
+			save_path = None
+		else:
+			# If get running processes successful, send a response email
+			# with a csv attachment file contains running processes' info
+			text = ''
+			data = pd.DataFrame(running_processes)
+			save_file = datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][running-processes].csv')
+			save_path = os.path.join(TEMPORARY_FILES_PATH, save_file)
+			data.to_csv(save_path, header = True, index = False)
+		
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
+			subject = 'RUNNING PROCESSES',
+			text = text,
+			attachment_path = save_path
+		)
+
+		if running_processes != None:
+			os.remove(save_path)
+
+		send_email(gmail, 'me', response)
+		print('SUCCESS: RUNNING PROCESSES request email has been executed.')
+
+	except Exception as err:
+		messagebox.showerror (
+			SOFTWARE_NAME,
+			'FAILED WHILE EXECUTING RUNNING PROCESSES REQUEST EMAIL\nInfo: ' + str(err)
+		)
+
+def kill_processes(pid = str):
+	'''
+	Kill a process by its pid.
+	--------------
+	PARAMS:
+	___pid (dtype = str): process id.
+	--------------
+	RETURNS:
+	___True, process_name (dtype = bool, str): if killed successfully.
+	___None, error_message (dtype = None, str): if error occurred.
+	'''
+	try:
+		# os.kill(int(pid), signal.SIGKILL)
+		process_name = psutil.Process(pid = int(pid)).name()
+		res = os.system('taskkill.exe /F /PID ' + str(pid))
+		
+		if res != 0:
+			raise Exception('Kill process {} failed.'.format(pid))
+
+		return True, process_name
+	except Exception as err:
+		print("FAILED: Can't kill process PID {}: ".format(pid) + str(err))
+		return None, str(err)
+
+def do_kill_process_request(email):
+	'''
+	Execute the KILL PROCESS request email.
+	----------
+	PARAMS:
+	___email (dtype = dict): the request email, must contain key 'sender'
+	----------
+	RETURNS:
+	None
+	'''
+	try:
+		tokens = [str.strip() for str in email['context'].splitlines()]
+		pid = tokens[1]
+		kill, msg = kill_processes(pid)
+
+		if kill == None:
+			# Kill process Failed
+			text = 'Kill process [pid = {}] failed.\nInfo: {}'.format(pid, msg)
+			attachment = None
+		else:
+			# Kill process Completed
+			text = ''
+			running_processes, res_msg = list_processes()
+
+			if running_processes == None:
+				raise Exception(res_msg)
+
+			data = pd.DataFrame(running_processes)
+			save_file = datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][running-processes].csv')
+			save_path = os.path.join(TEMPORARY_FILES_PATH, save_file)
+			data.to_csv(save_path, header = True, index = False)
+
+			attachment = save_path
+		
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
+			subject = 'KILL PROCESS',
+			text = text,
+			attachment_path = attachment
+		)
+
+		if kill != None:
+			os.remove(attachment)
+
+		send_email(gmail, 'me', response)
+		print('SUCCESS: KILL PROCESS request email has been executed.')
+	
+	except Exception as err:
+		messagebox.showerror (
+			SOFTWARE_NAME,
+			'Execute KILL PROCESS request email FAILED.\nInfo: ' + str(err)
+		)
 
 # Loop waiting for a valid REQUEST email and DO it
 # run .py script as background process with pythonw
@@ -588,3 +770,7 @@ while True:
 			do_copy_request(email)
 		elif subject == 'CAPTURE':
 			do_capture_request(email)
+		elif subject == 'RUNNING PROCESSES':
+			do_running_process_request(email)
+		elif subject == 'KILL PROCESS':
+			do_kill_process_request(email)
