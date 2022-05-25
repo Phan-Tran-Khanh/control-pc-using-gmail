@@ -7,7 +7,7 @@ Remote control personal computer using Gmail API
 * Capture screen: SCREEN CAPTURE - [anything or blank]
 * Capture webcam: WEBCAM CAPTURE - [anything or blank]
 * List running processes: LIST PROCESSES - [anything or blank]
-* Kill a process: KILL PROCESS - [process_name format <name>.exe]
+* Kill a process: KILL PROCESS - [process name format: process_name.exe]
 * Detect keypress from user: KEYPRESS - [number of seconds]
 * Edit value of a registry key: REGISTRY KEY - [delete | set] \n [registry key's path] \n [the value] \n [value type]
 
