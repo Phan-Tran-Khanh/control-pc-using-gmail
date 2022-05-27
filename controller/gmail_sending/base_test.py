@@ -14,11 +14,13 @@ TOKEN_PATH = 'controller/gmail_sending/token.json'
 class BaseTest(unittest.TestCase):
 
     RECIPIENT = 'computer.networking.team.18@gmail.com'
-    USER = 'laxohajc@gmail.com'
+    USER = None
 
     @classmethod
     def setUpClass(cls):
         cls.service = cls.create_service()
+        if not cls.USER:
+            cls.USER = cls.service.users().getProfile(userId='me').execute()['emailAddress']
 
     @classmethod
     def create_credentials(cls):
@@ -50,7 +52,7 @@ class BaseTest(unittest.TestCase):
 
     @classmethod
     def create_service(cls):
-        credentials = cls.create_credentials()
+        credentials = cls.create_credentials() 
         return discovery.build('gmail', 'v1', credentials=credentials)
 
 
