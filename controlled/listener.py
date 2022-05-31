@@ -1,28 +1,21 @@
 # import the required libraries
-import mimetypes
+import shutil, pickle, os, os.path, base64, datetime, tkinter
+from matplotlib.pyplot import pause
+import pyautogui, psutil, pystray, re, winreg, mimetypes
 from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
 from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import shutil
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
-import pickle
-import os, os.path
-import base64
 from bs4 import BeautifulSoup	# to decode email body
-import datetime
 from pandas import DataFrame
 from tkinter import messagebox
-import tkinter
 from tkinter import *
-import pyautogui	# to take screenshot
-import psutil	# to get running processes
 from threading import Timer, Thread
 from pynput.keyboard import Listener
-import pystray
 from PIL import Image
 from cv2 import VideoCapture, imwrite
 
@@ -886,6 +879,163 @@ def do_webcam_capture_request(email):
 			'Execute WEBCAM CAPTURE request email FAILED.\nInfo: ' + str(err)
 		)
 
+def parse_data(full_path):
+    try:
+        full_path = re.sub(r'/', r'\\', full_path)
+        hive = re.sub(r'\\.*$', '', full_path)
+        if not hive:
+            raise ValueError('Invalid \'full_path\' param.')
+        if len(hive) <= 4:
+            if hive == 'HKLM':
+                hive = 'HKEY_LOCAL_MACHINE'
+            elif hive == 'HKCU':
+                hive = 'HKEY_CURRENT_USER'
+            elif hive == 'HKCR':
+                hive = 'HKEY_CLASSES_ROOT'
+            elif hive == 'HKU':
+                hive = 'HKEY_USERS'
+        reg_key = re.sub(r'^[A-Z_]*\\', '', full_path)
+        reg_key = re.sub(r'\\[^\\]+$', '', reg_key)
+        reg_value = re.sub(r'^.*\\', '', full_path)
+        # return hive, reg_key, reg_value
+        return {'hive':hive, 'reg_key':reg_key, 'reg_value':reg_value}
+    except:
+        return {'hive':None, 'reg_key':None, 'reg_value':None}
+
+def query_value(full_path):
+    values = parse_data(full_path)
+    try:
+        opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'], 0, winreg.KEY_READ)
+        winreg.QueryValueEx(opened_key, values['reg_value'])
+        winreg.CloseKey(opened_key)
+        return True
+    except:
+        return False
+
+
+def get_value(full_path):
+    values = parse_data(full_path)
+    try:
+        opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'], 0, winreg.KEY_READ)
+        value_of_value, value_type = winreg.QueryValueEx(opened_key, values['reg_value'])
+        winreg.CloseKey(opened_key)
+        return ["1", value_of_value]
+    except:
+        return False
+
+def dec_value(c):
+    c = c.upper()
+    if ord('0') <= ord(c) and ord(c) <= ord('9'):
+        return ord(c) - ord('0')
+    if ord('A') <= ord(c) and ord(c) <= ord('F'):
+        return ord(c) - ord('A') + 10
+    return 0
+
+def str_to_bin(s):
+    res = b""
+    for i in range(0, len(s), 2):
+        a = dec_value(s[i])
+        b = dec_value(s[i + 1])
+        res += (a * 16 + b).to_bytes(1, byteorder='big')
+    return res
+
+def str_to_dec(s):
+    s = s.upper()
+    res = 0
+    for i in range(0, len(s)):
+        v = dec_value(s[i])
+        res = res*16 + v
+    return res
+
+
+def set_value(full_path, value, value_type):
+    values = parse_data(full_path)
+    try:
+        winreg.CreateKey(getattr(winreg, values['hive']), values['reg_key'])
+        opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'], 0, winreg.KEY_WRITE)
+        if 'REG_BINARY' in value_type:
+            if len(value) % 2 == 1:
+                value += '0'
+            value = str_to_bin(value)
+        if 'REG_DWORD' in value_type:
+            if len(value) > 8:
+                value = value[:8]
+            value = str_to_dec(value)
+        if 'REG_QWORD' in value_type:
+            if len(value) > 16:
+                value = value[:16]
+            value = str_to_dec(value)                 
+        
+        winreg.SetValueEx(opened_key, values['reg_value'], 0, getattr(winreg, value_type), value)
+        winreg.CloseKey(opened_key)
+        return True
+    except:
+        return False
+
+
+def delete_value(full_path):
+    values = parse_data(full_path)
+    try:
+        opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'], 0, winreg.KEY_WRITE)
+        winreg.DeleteValue(opened_key, values['reg_value'])
+        winreg.CloseKey(opened_key)
+        return True
+    except:
+        return False
+
+
+def query_key(full_path):
+    values = parse_data(full_path)
+    try:
+        opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'] + r'\\' + values['reg_value'], 0, winreg.KEY_READ)
+        winreg.CloseKey(opened_key)
+        return True
+    except:
+        return False
+
+
+def create_key(full_path):
+    values = parse_data(full_path)
+    try:
+        winreg.CreateKey(getattr(winreg, values['hive']), values['reg_key'] + r'\\' + values['reg_value'])
+        return True
+    except:
+        return False
+
+
+def delete_key(full_path):
+    values = parse_data(full_path)
+    try:
+        winreg.DeleteKey(getattr(winreg, values['hive']), values['reg_key'] + r'\\' + values['reg_value'])
+        return True
+    except:
+        return False
+
+def do_registry_request(email):
+	try:
+		# Extract information from email's context
+		tokens = [str.strip() for str in email['context'].splitlines()]
+		request = tokens[1]
+		full_path = tokens[2]
+		value = tokens[3]
+		value_type = tokens[4]
+
+		# Try executing the request
+		if request.lower() == 'delete':
+			result = delete_value(full_path)
+		elif request.lower() == 'set':
+			result = set_value(full_path, value, value_type)
+		
+		# If failed, then raise exception
+		if result == False:
+			raise Exception("{} registry value failed.".format(request))
+
+		gui_print("SUCCESS: Executed {} registry value request email.".format(request))
+
+	except Exception as err:
+		gui_print("FAILED: {}".format(str(err)))
+		messagebox.showerror(SOFTWARE_NAME, str(err))
+
 def prepare_for_listen():
 	try:
 		global SCOPES, creds, auth_email_address, gmail
@@ -959,6 +1109,8 @@ def listen():
 					do_catchkeys_request(email)
 				elif subject == 'WEBCAM CAPTURE':
 					do_webcam_capture_request(email)
+				elif subject == 'REGISTRY KEY':
+					do_registry_request(email)
 
 	except Exception as err:
 		messagebox.showerror(SOFTWARE_NAME, 'Error while listening: ' + str(err))
@@ -986,21 +1138,27 @@ def about_info():
 	messagebox.showinfo("About", message)
 
 def how_to_use():
-	global auth_email_address
-	README_PATH = "README.md"
-	with open(README_PATH, "rt") as instructions:
-		message = "Send request emails to this email address: {}\n\n".format(auth_email_address)
-		message = message + instructions.read().replace("*","")
-		messagebox.showinfo("How to use this software?", message)
+	try:
+		global auth_email_address
+		README_PATH = "README.md"
+		with open(README_PATH, "rt") as instructions:
+			message = "Send request emails to this email address: {}\n\n".format(auth_email_address)
+			message = message + instructions.read().replace("*","")
+			messagebox.showinfo("How to use this software?", message)
+	except Exception as err:
+		message = "Send request emails to this email address: {}\n{}\n".format(auth_email_address, str(err))
+		messagebox.showerror("How to use this software?", message)
 
 def show_window():
 	main_window.after(0, func = main_window.deiconify)
 
 def system_tray_icon():
-	global icon
+	global icon, pause_or_continue
+	pause_or_continue = 'Pause'
 	image = Image.open("icon.ico")
 	menu = (
 		pystray.MenuItem('Show', show_window),
+		pystray.MenuItem(lambda text: pause_or_continue, pause_listen),
 		pystray.MenuItem('About', about_info),
 		pystray.MenuItem('How to use?', how_to_use),
 		pystray.MenuItem('Quit', terminate_mainloop)
@@ -1012,17 +1170,21 @@ def hide_window():
 	main_window.withdraw()
 
 def pause_listen():
-	global stop_listen, btn_pause
+	global stop_listen, btn_pause, pause_or_continue, icon
 
 	if btn_pause['text'] == 'Pause':
 		stop_listen = True
 		btn_pause['text'] = 'Continue'
+		pause_or_continue = 'Continue'
+		icon.update_menu()
 		gui_print("Paused listening...")
 
 	elif btn_pause['text'] == 'Continue':
 		start_listen = Thread(target = listen, daemon = True)
 		start_listen.start()
 		btn_pause['text'] = 'Pause'
+		pause_or_continue = 'Pause'
+		icon.update_menu()
 		gui_print("Continued listening...")
 
 def graphical_UI():
@@ -1031,7 +1193,7 @@ def graphical_UI():
 	main_window = tkinter.Tk()
 	main_window.title(SOFTWARE_NAME)
 	main_window.iconbitmap("icon.ico")
-	main_window.geometry("700x425")
+	main_window.geometry("700x435")
 	main_window.resizable(width=False, height=False)
 
 	txt = Text(main_window)
@@ -1040,30 +1202,34 @@ def graphical_UI():
 	buttons.pack(side = TOP)
 
 	btn_pause = Button(buttons, text = "Pause", command = pause_listen)
-	btn_pause.pack(side = LEFT)
+	btn_pause.pack(side = LEFT, padx = 5)
 
 	btn_exit = Button(buttons, text="Exit", command = terminate_mainloop)
-	btn_exit.pack(side = LEFT)
+	btn_exit.pack(side = LEFT, padx = 5)
 
 	btn_hide = Button(buttons, text = "Hide", command = hide_window)
-	btn_hide.pack(side = LEFT)
+	btn_hide.pack(side = LEFT, padx = 5)
 
 	btn_about = Button(buttons, text = "About", command = about_info)
-	btn_about.pack(side = LEFT)
+	btn_about.pack(side = LEFT, padx = 5)
 
 	btn_how_to_use = Button(buttons, text = "How to use?", command = how_to_use)
-	btn_how_to_use.pack(side = LEFT)
+	btn_how_to_use.pack(side = LEFT, padx = 5)
 
 	main_window.protocol('WM_DELETE_WINDOW', hide_window)
 	
 	prepare_for_listen()
+
+	global auth_email_address
+	receiver = Label(main_window, text = "Email to receive request: {}".format(auth_email_address), pady = 10)
+	receiver.pack(side = BOTTOM)
+
 	start_listen = Thread(target = listen, daemon = True)
 	start_listen.start()
 	main_window.mainloop()
 
 if __name__ == "__main__":
 	main_ui = Thread(target = graphical_UI)
-	tray_icon = Thread(target = system_tray_icon, daemon=True)
-
+	tray_icon = Thread(target = system_tray_icon, daemon = True)
 	main_ui.start()
 	tray_icon.start()
