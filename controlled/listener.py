@@ -6,7 +6,6 @@ from email.mime.image import MIMEImage
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import shutil
-import tkinter
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
@@ -15,8 +14,9 @@ import os, os.path
 import base64
 from bs4 import BeautifulSoup	# to decode email body
 import datetime
-import pandas as pd
+from pandas import DataFrame
 from tkinter import messagebox
+import tkinter
 from tkinter import *
 import pyautogui	# to take screenshot
 import psutil	# to get running processes
@@ -24,6 +24,7 @@ from threading import Timer, Thread
 from pynput.keyboard import Listener
 import pystray
 from PIL import Image
+from cv2 import VideoCapture, imwrite
 
 SECRET_KEY = '019250304'
 SOFTWARE_NAME = 'PC Remote Control Using Email'
@@ -122,8 +123,6 @@ def read_email():
 		return email, "No Error"
 
 	except Exception as error:
-		if str(error) != "UNREAD mail box is empty":
-			gui_print('FAILED: ' + str(error))
 		return None, str(error)
 
 def build_file_part(file):
@@ -567,7 +566,7 @@ def take_screenshot(save_dir = str):
 
 def do_capture_request(email):
 	'''
-	Execute CAPTURE request email.
+	Execute SCREEN CAPTURE request email.
 	--------------
 	PARAMS:
 	___email (dtype = dict): the request email, contains 3 keys {'subject', 'sender', 'context'}.
@@ -590,7 +589,7 @@ def do_capture_request(email):
 		response = create_email (
 			sender = auth_email_address,
 			receiver = get_sender_address(email),
-			subject = 'CAPTURE',
+			subject = 'SCREEN CAPTURE',
 			text = text,
 			attachment_path = screenshot_path
 		)
@@ -601,7 +600,7 @@ def do_capture_request(email):
 
 		if send_email(gmail, 'me', response) == None:
 			raise Exception("Send email failed.")
-		gui_print('SUCCESS: CAPTURE request email has been executed.')
+		gui_print('SUCCESS: SCREEN CAPTURE request email has been executed.')
 
 	except Exception as err:
 		messagebox.showwarning(SOFTWARE_NAME, 'SCREEN CAPTURE FAILED\n' + str(err))
@@ -649,7 +648,7 @@ def list_processes():
 
 def do_running_process_request(email):
 	'''
-	Execute the RUNNING PROCESSES request email.
+	Execute the LIST PROCESSES request email.
 	----------------
 	PARAMS:
 	___email (dtype = dict): the request email. Must contains key 'sender'
@@ -670,7 +669,7 @@ def do_running_process_request(email):
 			# If get running processes successful, send a response email
 			# with a csv attachment file contains running processes' info
 			text = ''
-			data = pd.DataFrame(running_processes)
+			data = DataFrame(running_processes)
 			save_file = datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][running-processes].csv')
 			save_path = os.path.join(TEMPORARY_FILES_PATH, save_file)
 			data.to_csv(save_path, header = True, index = False)
@@ -678,7 +677,7 @@ def do_running_process_request(email):
 		response = create_email (
 			sender = auth_email_address,
 			receiver = get_sender_address(email),
-			subject = 'RUNNING PROCESSES',
+			subject = 'LIST PROCESSES',
 			text = text,
 			attachment_path = save_path
 		)
@@ -689,12 +688,12 @@ def do_running_process_request(email):
 
 		if send_email(gmail, 'me', response) == None:
 			raise Exception("Send email failed.")
-		gui_print('SUCCESS: RUNNING PROCESSES request email has been executed.')
+		gui_print('SUCCESS: LIST PROCESSES request email has been executed.')
 
 	except Exception as err:
 		messagebox.showerror (
 			SOFTWARE_NAME,
-			'FAILED WHILE EXECUTING RUNNING PROCESSES REQUEST EMAIL\nInfo: ' + str(err)
+			'FAILED WHILE EXECUTING LIST PROCESSES REQUEST EMAIL\nInfo: ' + str(err)
 		)
 
 def kill_processes(pid = str):
@@ -745,34 +744,17 @@ def do_kill_process_request(email):
 		if kill == None:
 			# If Kill process Failed
 			text = 'Kill process [pid = {}] failed.\nInfo: {}'.format(pid, msg)
-			attachment = None
 		else:
-			# If Kill process Completed, create a csv file to show
-			# the running processes after kill the target process
-			text = ''
-			running_processes, res_msg = list_processes()
-
-			if running_processes == None:
-				raise Exception(res_msg)
-
-			data = pd.DataFrame(running_processes)
-			save_file = datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][running-processes].csv')
-			save_path = os.path.join(TEMPORARY_FILES_PATH, save_file)
-			data.to_csv(save_path, header = True, index = False)
-
-			attachment = save_path
+			# If Kill process Completed
+			text = 'Successfully killed process [pid = {}, name = {}].'.format(pid, msg)
 		
 		response = create_email (
 			sender = auth_email_address,
 			receiver = get_sender_address(email),
 			subject = 'KILL PROCESS',
 			text = text,
-			attachment_path = attachment
+			attachment_path = None
 		)
-
-		# Delete the created csv file (if necessary)
-		if kill != None:
-			os.remove(attachment)
 
 		if send_email(gmail, 'me', response) == None:
 			raise Exception("Send email failed.")
@@ -830,7 +812,7 @@ def do_catchkeys_request(email):
 		response = create_email (
             sender = auth_email_address,
             receiver = get_sender_address(email),
-            subject = "CATCH KEYS",
+            subject = "KEYPRESS",
             text = text_content,
             attachment_path = attachment_file
         )
@@ -843,52 +825,112 @@ def do_catchkeys_request(email):
 		if result == None:
 			raise Exception("Send email failed.")
 
-		gui_print('SUCCESS: CATCH KEYS request email has been executed.')
+		gui_print('SUCCESS: KEYPRESS request email has been executed.')
 	
 	except Exception as err:
 		messagebox.showerror (
 			SOFTWARE_NAME,
-			'Execute CATCH KEYS request email FAILED.\nInfo: ' + str(err)
+			'Execute KEYPRESS request email FAILED.\nInfo: ' + str(err)
+		)
+
+def webcam_shot():
+	try:
+		camera_port = 0
+		camera = VideoCapture(camera_port)
+		result, image = camera.read()
+		
+		if result == False:
+			raise Exception("Take webcam-shot failed")
+		
+		file_name = datetime.datetime.now().strftime("[%d-%m-%Y-%H-%M-%S][webcam-capture].png")
+		save_path = os.path.join(TEMPORARY_FILES_PATH, file_name)
+		imwrite(filename = save_path, img = image)
+		gui_print("SUCCESS: Webcam captured.")
+		return True, save_path
+	
+	except Exception as err:
+		return None, str(err)
+			
+def do_webcam_capture_request(email):
+	try:
+		result, message = webcam_shot()
+
+		if result == None:
+			text = "Webcam capture failed.\nInfo: " + message
+			attachment = None
+		else:
+			text = ""
+			attachment = message
+		
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
+			subject = "WEBCAM CAPTURE",
+			text = text,
+			attachment_path = attachment
+		)
+
+		if result == True:
+			os.remove(message)
+
+		result = send_email(gmail, "me", response)
+		if result == None:
+			raise Exception("Send email failed")
+
+		gui_print('SUCCESS: WEBCAM CAPTURE request email has been executed.')
+
+	except Exception as err:
+		gui_print("FAILED: " + str(err))
+		messagebox.showerror (
+			SOFTWARE_NAME,
+			'Execute WEBCAM CAPTURE request email FAILED.\nInfo: ' + str(err)
 		)
 
 def prepare_for_listen():
-	global SCOPES, creds, auth_email_address, gmail
+	try:
+		global SCOPES, creds, auth_email_address, gmail
 
-	auth_email_address = "Undefined"
-	creds = None
+		auth_email_address = "Undefined"
+		creds = None
 
-	# Create a folder for temporary files
-	if not os.path.isdir(TEMPORARY_FILES_PATH):
-		os.makedirs(TEMPORARY_FILES_PATH)
+		# Create a folder for temporary files
+		if not os.path.isdir(TEMPORARY_FILES_PATH):
+			os.makedirs(TEMPORARY_FILES_PATH)
 
-	# if you modify this SCOPES, you need to delete file token.pickle first
-	# unless the code will not run
-	SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
+		# if you modify this SCOPES, you need to delete file token.pickle first
+		# unless the code will not run
+		SCOPES = ['https://www.googleapis.com/auth/gmail.modify']
 
-	# Load the credentials
-	# Credential is saved in token.pickle
-	if os.path.exists(TOKEN_FILE):
-		with open(TOKEN_FILE, 'rb') as token:
-			creds = pickle.load(token)
+		# Load the credentials
+		# Credential is saved in token.pickle
+		if os.path.exists(TOKEN_FILE):
+			with open(TOKEN_FILE, 'rb') as token:
+				creds = pickle.load(token)
 
-	# If credentials are not available or are invalid, ask the user to log in.
-	if not creds or not creds.valid:
-		if creds and creds.expired and creds.refresh_token:
-			creds.refresh(Request())
-		else:
-			messagebox.showinfo(SOFTWARE_NAME, "Please log in to your Google account again.")
-			flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-			creds = flow.run_local_server(port=0)
-		# Save the access token in token.pickle file for the next run
-		with open(TOKEN_FILE, 'wb') as token:
-			pickle.dump(creds, token)
+		# If credentials are not available or are invalid, ask the user to log in.
+		if not creds or not creds.valid:
+			if creds and creds.expired and creds.refresh_token:
+				creds.refresh(Request())
+			else:
+				messagebox.showinfo(SOFTWARE_NAME, "Please log in to your Google account.")
+				flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+				creds = flow.run_local_server(port=0)
+			# Save the access token in token.pickle file for the next run
+			with open(TOKEN_FILE, 'wb') as token:
+				pickle.dump(creds, token)
 
-		# Connect to the Gmail API
-	gmail = build('gmail', 'v1', credentials=creds)
+			# Connect to the Gmail API
+		gmail = build('gmail', 'v1', credentials=creds)
 
-	# Email address if authenticated Gmail user.
-	auth_email_address = gmail.users().getProfile(userId = 'me').execute()['emailAddress']
-	gui_print('SUCCESS: Connected to Gmail service.\nAuthenticated user: {}'.format(auth_email_address))
+		# Email address if authenticated Gmail user.
+		auth_email_address = gmail.users().getProfile(userId = 'me').execute()['emailAddress']
+		gui_print('SUCCESS: Connected to Gmail service.\nAuthenticated user: {}'.format(auth_email_address))
+	
+	except Exception:
+		# If error occurred, try log in again
+		if os.path.isfile(TOKEN_FILE):
+			os.remove(TOKEN_FILE)
+		prepare_for_listen()
 
 def listen():
 	global SCOPES, creds, gmail, auth_email_address
@@ -907,14 +949,16 @@ def listen():
 					do_shutdown_request(email)
 				elif subject == 'COPY FILE':
 					do_copy_request(email)
-				elif subject == 'CAPTURE':
+				elif subject == 'SCREEN CAPTURE':
 					do_capture_request(email)
-				elif subject == 'RUNNING PROCESSES':
+				elif subject == 'LIST PROCESSES':
 					do_running_process_request(email)
 				elif subject == 'KILL PROCESS':
 					do_kill_process_request(email)
-				elif subject == 'CATCH KEYS':
+				elif subject == 'KEYPRESS':
 					do_catchkeys_request(email)
+				elif subject == 'WEBCAM CAPTURE':
+					do_webcam_capture_request(email)
 
 	except Exception as err:
 		messagebox.showerror(SOFTWARE_NAME, 'Error while listening: ' + str(err))
@@ -939,7 +983,15 @@ def terminate_mainloop():
 def about_info():
 	message = "PC Remote Control Using Email v1.0\nEmail to receive request email: {}".format(auth_email_address)
 	message = message + "\nDeveloped by Bao-Anh Tran"
-	messagebox.showinfo(SOFTWARE_NAME, message)
+	messagebox.showinfo("About", message)
+
+def how_to_use():
+	global auth_email_address
+	README_PATH = "README.md"
+	with open(README_PATH, "rt") as instructions:
+		message = "Send request emails to this email address: {}\n\n".format(auth_email_address)
+		message = message + instructions.read().replace("*","")
+		messagebox.showinfo("How to use this software?", message)
 
 def show_window():
 	main_window.after(0, func = main_window.deiconify)
@@ -950,6 +1002,7 @@ def system_tray_icon():
 	menu = (
 		pystray.MenuItem('Show', show_window),
 		pystray.MenuItem('About', about_info),
+		pystray.MenuItem('How to use?', how_to_use),
 		pystray.MenuItem('Quit', terminate_mainloop)
 	)
 	icon = pystray.Icon("email-remote-control-icon", image, SOFTWARE_NAME, menu)
@@ -989,7 +1042,7 @@ def graphical_UI():
 	btn_pause = Button(buttons, text = "Pause", command = pause_listen)
 	btn_pause.pack(side = LEFT)
 
-	btn_exit = Button(buttons, text="Exit", command=terminate_mainloop)
+	btn_exit = Button(buttons, text="Exit", command = terminate_mainloop)
 	btn_exit.pack(side = LEFT)
 
 	btn_hide = Button(buttons, text = "Hide", command = hide_window)
@@ -997,6 +1050,9 @@ def graphical_UI():
 
 	btn_about = Button(buttons, text = "About", command = about_info)
 	btn_about.pack(side = LEFT)
+
+	btn_how_to_use = Button(buttons, text = "How to use?", command = how_to_use)
+	btn_how_to_use.pack(side = LEFT)
 
 	main_window.protocol('WM_DELETE_WINDOW', hide_window)
 	

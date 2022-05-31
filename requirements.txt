@@ -7,3 +7,4 @@ pyautogui
 psutil
 pynput
 pystray
+opencv-python
