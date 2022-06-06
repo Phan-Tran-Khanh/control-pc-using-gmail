@@ -84,6 +84,7 @@ class Gmail(BaseTest):
         error: None
 
         Remember to leave attachment folder empty.
+        Remove files from attachment folder after this method carries out successful.
 
         Exception:
         None, None, error: string
@@ -122,21 +123,25 @@ class Gmail(BaseTest):
                 data = payload['body']['data']
             else:
             # This only applies to container MIME message parts, for example multipart/*.
+                data = None
                 parts = payload.get('parts')[0]
                 mimeType = parts['mimeType']
-                while mimeType != 'text/plain' and mimeType != 'text/html' and 'parts' in parts:
+                while (mimeType != 'text/plain' and mimeType != 'text/html') and 'parts' in parts:
                     part = parts.get('parts')[0]
                     mimeType = part['mimeType']
                     parts = part
-                data = parts['body']['data']
-                if not data:
-                    raise Exception("Cannot parse this email.")
+                if parts['body']['data']:
+                    data = parts['body']['data']
+
             
             # The Body of the message is in Encrypted format. So, we have to decode it.
             # Get the data and decode it with base 64 decoder.
-            data = data.replace("-","+").replace("_","/")
-            decoded_data = base64.b64decode(data)
-            plain_text = decoded_data.decode('utf-8')
+            plain_text = None
+            # If this email has text
+            if data:
+                data = data.replace("-","+").replace("_","/")
+                decoded_data = base64.b64decode(data)
+                plain_text = decoded_data.decode('utf-8')
 
             # Now, the data obtained is in lxml. So, we will parse
             # it with BeautifulSoup library
@@ -145,7 +150,7 @@ class Gmail(BaseTest):
 
             attachments = None
             
-            # If this message is not plain text.
+            # If this message is not plain text only.
             if 'parts' in payload:
                 save_location = os.getcwd() + "\\controller\\attachment"
                 attachments = []
@@ -287,6 +292,27 @@ class Gmail(BaseTest):
         except HttpError as error:
             return str(error)
 
+    # BUTTON [WEBCAM RECORD]
+    def send_record_webcam(self, time: str):
+        """Send a message requesting your personal computer to record its webcam.
+
+        Args:
+        time<integer>: Recording time
+
+        Returns:
+        error: string (exception).
+        """
+        
+        msg_text = self.SECRET_KEY + '\n' + time
+        message = send_email.create_message(Gmail.USER,
+                                            Gmail.RECIPIENT,
+                                            'CAPTURE RECORD',
+                                            msg_text)
+        try:
+            sent_message = send_email.send_message(self.service, 'me', message)
+        except HttpError as error:
+            return str(error)
+
     # BUTTON [LIST PROCESSES]
     def send_list_processes(self):
         """Send a message requesting your personal computer to list running processes.
@@ -309,17 +335,17 @@ class Gmail(BaseTest):
             return str(error)
     
     # BUTTON [KILL PROCESS]
-    def send_kill_process(self, process_name: str):
+    def send_kill_process(self, process_id: str):
         """Send a message requesting your personal computer to kill a running process.
 
         Args:
-        process_name<name.exe>: Process' name.
+        process_id: PID.
 
         Returns:
         error: string (exception).
         """
         
-        msg_text = self.SECRET_KEY + '\n' + process_name
+        msg_text = self.SECRET_KEY + '\n' + process_id
         message = send_email.create_message(Gmail.USER,
                                             Gmail.RECIPIENT,
                                             'KILL PROCESS',
