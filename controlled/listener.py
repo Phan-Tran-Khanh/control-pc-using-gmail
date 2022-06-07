@@ -1,6 +1,6 @@
 # import the required libraries
+from email import encoders
 import shutil, pickle, os, os.path, base64, datetime, tkinter
-from matplotlib.pyplot import pause
 import pyautogui, psutil, pystray, re, winreg, mimetypes
 from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
@@ -17,12 +17,14 @@ from tkinter import *
 from threading import Timer, Thread
 from pynput.keyboard import Listener
 from PIL import Image
-from cv2 import VideoCapture, imwrite
+from cv2 import VideoCapture, imwrite, VideoWriter, VideoWriter_fourcc
 
 SECRET_KEY = '019250304'
 SOFTWARE_NAME = 'PC Remote Control Using Email'
 TEMPORARY_FILES_PATH = 'temp'
 TOKEN_FILE = 'token.pickle'
+DATETIME_FORMAT = '%Y-%m-%d-%H-%M-%S'
+LIMIT_VIDEO_LENGTH = 30
 
 def gui_print(msg = str):
 	txt.config(state = NORMAL)
@@ -31,9 +33,22 @@ def gui_print(msg = str):
 	txt.see(index = END)
 	txt.config(state = DISABLED)
 
+valid_subjects = [
+	'SHUTDOWN',
+	'RESTART',
+	'COPY FILE',
+	'SCREEN CAPTURE',
+	'WEBCAM CAPTURE',
+	'WEBCAM RECORD',
+	'LIST PROCESSES',
+	'KILL PROCESS',
+	'KEYPRESS',
+	'REGISTRY KEY'
+]
+
 def read_email():
 	'''
-	Reads 1 latest unread email from the authenticated Gmail user.
+	Reads 1 latest unread request email from the authenticated Gmail user.
 	----------------------------------
 	PARAMS:
 	No parameter.
@@ -81,6 +96,15 @@ def read_email():
 			if d['name'] == 'From':
 				sender = d['value']
 
+		if not subject in valid_subjects:
+			# Mark the email as READ
+			gmail.users().messages().modify(
+				userId = 'me',
+				id = fucking_msg['id'],
+				body = {'removeLabelIds': ['UNREAD']}
+			).execute()
+			raise Exception('Invalid subject')
+
 		# Get body data, depends on mimeType of the Email
 		mimeType = payload['mimeType']
 		if mimeType == 'text/plain' or mimeType == 'text/html':
@@ -101,7 +125,7 @@ def read_email():
 		
 		# Check secret key
 		if body.find(SECRET_KEY) == -1:
-			return None, 'Secret key not found!'
+			raise Exception('Secret key not found')
 		
 		email = {'subject':subject, 'sender':sender, 'context':body}
 		
@@ -133,6 +157,8 @@ def build_file_part(file):
 		if not os.path.isfile(file):
 			raise Exception('File ' + file + ' not exist.')
 
+		file_size = round(os.stat(file).st_size / (1024.0 * 1024), ndigits = 2)
+
 		content_type, encoding = mimetypes.guess_type(file)
 
 		if content_type is None or encoding is not None:
@@ -156,13 +182,15 @@ def build_file_part(file):
 
 		filename = os.path.basename(file)
 		msg.add_header('Content-Disposition', 'attachment', filename=filename)
+
+		if main_type != 'text':
+			encoders.encode_base64(msg)
 		
-		gui_print('SUCCESS: File part has been built, content type = {}'.format(content_type))
+		gui_print('SUCCESS: File part has been built, content type = {}, attachment\'s size = {} MB'.format(content_type, str(file_size)))
 		return msg
 
 	except Exception as err:
 		gui_print('FAILED: Build file part unsuccessful: ' + str(err))
-		messagebox.showwarning(SOFTWARE_NAME, 'Build File Part Failed: ' + str(err))
 
 def create_email(sender = str, receiver = str, subject = str, text = str, attachment_path = None | str):
 	'''
@@ -179,6 +207,7 @@ def create_email(sender = str, receiver = str, subject = str, text = str, attach
 	The raw body data of the email.
 	'''
 	try:
+		gui_print('Creating email...')
 		mime_message = MIMEMultipart()
 
 		mime_message['To'] = receiver
@@ -199,8 +228,7 @@ def create_email(sender = str, receiver = str, subject = str, text = str, attach
 		}
 	except Exception as err:
 		gui_print('FAILED: Create email unsuccessfull: ' + str(err))
-		messagebox.showwarning(SOFTWARE_NAME, 'Create email failed: ' + str(err))
-
+		return None
 
 def send_email(service, user_id, body):
 	'''
@@ -216,13 +244,21 @@ def send_email(service, user_id, body):
 	___None: send email failed.
 	'''
 	try:
+		gui_print('Sending an email...')
 		message = service.users().messages().send(userId=user_id, body=body).execute()
 		gui_print('SUCCESS: Sent an email.')
 		return message
 	except Exception as e:
-		gui_print('FAILED: Can\'t send email: ' + str(e))
-		messagebox.showerror(SOFTWARE_NAME, 'Send Email Failed: ' + str(e))
-		return None
+		try:
+			gui_print('FAILED: Send email failed: {}'.format(str(e)))
+			gui_print('Trying to send again...')
+			prepare_for_listen()
+			message = service.users().messages().send(userId=user_id, body=body).execute()
+			gui_print('SUCCESS: Sent an email.')
+			return message
+		except Exception as e:
+			gui_print('FAILED: Can\'t send email: ' + str(e))
+			return None
 
 def time_parser(time_string):
 	'''
@@ -407,9 +443,8 @@ def do_restart_request(email):
 
 		gui_print('SUCCESS: RESTART request email has been successfully executed.')
 	
-	except Exception as error:
-		err_msg = 'RESTART SCHEDULE FAILED\n' + str(error)
-		messagebox.showwarning(SOFTWARE_NAME, err_msg)
+	except Exception as err:
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def do_shutdown_request(email):
 	'''
@@ -448,8 +483,7 @@ def do_shutdown_request(email):
 		gui_print('SUCCESS: SHUTDOWN request email has been successfully executed.')
 
 	except Exception as err:
-		err_msg = 'SHUTDOWN SCHEDULE FAILED\n' + str(err)
-		messagebox.showwarning(SOFTWARE_NAME, err_msg)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def copy_file(src_path, dest_path):
 	'''
@@ -520,8 +554,7 @@ def do_copy_request(email):
 		gui_print('SUCCESS: COPY request email has been successfully executed.')
 
 	except Exception as err:
-		err_msg = 'COPY FILE FAILED\n' + str(err)
-		messagebox.showwarning(SOFTWARE_NAME, err_msg)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def take_screenshot(save_dir = str):
 	'''
@@ -529,7 +562,7 @@ def take_screenshot(save_dir = str):
 	-------------
 	PARAMS:
 	___save_dir (dtype = str): directory to save image file, image file name
-	will be generated by screenshot time. Format: 'save_dir/%d-%m-%Y-%H-%M-%S.png'
+	will be generated by screenshot time. Format: 'save_dir/%Y-%m-%d-%H-%M-%S.png'
 	-------------
 	RETURNS:
 	___None, error_message (dtype = None, str): if error occurred.
@@ -544,7 +577,7 @@ def take_screenshot(save_dir = str):
 			os.makedirs(save_dir)
 
 		# File name is screenshot time.png
-		file_name = str(datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][screenshot].png'))
+		file_name = str(datetime.datetime.now().strftime('[{}][screenshot].png'.format(DATETIME_FORMAT)))
 		save_path = os.path.join(save_dir, file_name)
 
 		# Save the screenshot image file
@@ -596,7 +629,7 @@ def do_capture_request(email):
 		gui_print('SUCCESS: SCREEN CAPTURE request email has been executed.')
 
 	except Exception as err:
-		messagebox.showwarning(SOFTWARE_NAME, 'SCREEN CAPTURE FAILED\n' + str(err))
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def list_processes():
 	'''
@@ -663,7 +696,7 @@ def do_running_process_request(email):
 			# with a csv attachment file contains running processes' info
 			text = ''
 			data = DataFrame(running_processes)
-			save_file = datetime.datetime.now().strftime('[%d-%m-%Y-%H-%M-%S][running-processes].csv')
+			save_file = datetime.datetime.now().strftime('[{}][running-processes].csv'.format(DATETIME_FORMAT))
 			save_path = os.path.join(TEMPORARY_FILES_PATH, save_file)
 			data.to_csv(save_path, header = True, index = False)
 		
@@ -684,10 +717,7 @@ def do_running_process_request(email):
 		gui_print('SUCCESS: LIST PROCESSES request email has been executed.')
 
 	except Exception as err:
-		messagebox.showerror (
-			SOFTWARE_NAME,
-			'FAILED WHILE EXECUTING LIST PROCESSES REQUEST EMAIL\nInfo: ' + str(err)
-		)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def kill_processes(pid = str):
 	'''
@@ -708,6 +738,8 @@ def kill_processes(pid = str):
 		# If kill process failed, raise exception
 		if res != 0:
 			raise Exception('Kill process {} failed.'.format(pid))
+
+		gui_print('SUCCESS: Process {}, ID = {} has been killed.'.format(process_name, pid))
 
 		return True, process_name
 
@@ -754,10 +786,7 @@ def do_kill_process_request(email):
 		gui_print('SUCCESS: KILL PROCESS request email has been executed.')
 	
 	except Exception as err:
-		messagebox.showerror (
-			SOFTWARE_NAME,
-			'Execute KILL PROCESS request email FAILED.\nInfo: ' + str(err)
-		)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def on_press(key):
 	key = str(key).lower().replace("key.","").replace("'","")
@@ -821,10 +850,7 @@ def do_catchkeys_request(email):
 		gui_print('SUCCESS: KEYPRESS request email has been executed.')
 	
 	except Exception as err:
-		messagebox.showerror (
-			SOFTWARE_NAME,
-			'Execute KEYPRESS request email FAILED.\nInfo: ' + str(err)
-		)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def webcam_shot():
 	try:
@@ -835,7 +861,7 @@ def webcam_shot():
 		if result == False:
 			raise Exception("Take webcam-shot failed")
 		
-		file_name = datetime.datetime.now().strftime("[%d-%m-%Y-%H-%M-%S][webcam-capture].png")
+		file_name = datetime.datetime.now().strftime("[{}][webcam-capture].png".format(DATETIME_FORMAT))
 		save_path = os.path.join(TEMPORARY_FILES_PATH, file_name)
 		imwrite(filename = save_path, img = image)
 		gui_print("SUCCESS: Webcam captured.")
@@ -873,11 +899,7 @@ def do_webcam_capture_request(email):
 		gui_print('SUCCESS: WEBCAM CAPTURE request email has been executed.')
 
 	except Exception as err:
-		gui_print("FAILED: " + str(err))
-		messagebox.showerror (
-			SOFTWARE_NAME,
-			'Execute WEBCAM CAPTURE request email FAILED.\nInfo: ' + str(err)
-		)
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def parse_data(full_path):
     try:
@@ -1033,8 +1055,79 @@ def do_registry_request(email):
 		gui_print("SUCCESS: Executed {} registry value request email.".format(request))
 
 	except Exception as err:
-		gui_print("FAILED: {}".format(str(err)))
-		messagebox.showerror(SOFTWARE_NAME, str(err))
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
+
+def webcam_record(record_time = int):
+    try:
+		# Limit the file size to under 25MB
+        if record_time > LIMIT_VIDEO_LENGTH:
+            record_time = LIMIT_VIDEO_LENGTH
+
+        file_name = datetime.datetime.now().strftime('[{}][webcam-record].mp4'.format(DATETIME_FORMAT))
+        save_path = os.path.join(TEMPORARY_FILES_PATH, file_name)
+
+        camera_port = 0
+        video_codec = VideoWriter_fourcc(*'MP4V')
+        fps = 24.0
+        video_writer = VideoWriter(save_path, video_codec, fps, (640, 480))
+        video_capture = VideoCapture(camera_port)
+
+        total_frame = fps * float(record_time)
+        writed_frame = 0
+
+        gui_print('Started webcam recording, stop after {} second(s)'.format(str(record_time)))
+        while True:
+            frame = video_capture.read()[1]
+            video_writer.write(frame)
+            writed_frame += 1
+            if writed_frame >= total_frame:
+                break
+        gui_print('Stopped webcam recording')
+
+        video_capture.release()
+        video_writer.release()
+
+        return True, save_path
+
+    except Exception as err:
+        return None, str(err)
+
+def do_webcam_record_request(email):
+	try:
+		tokens = [str.strip() for str in email['context'].splitlines()]
+		time = int(tokens[1])
+
+		record_result, return_message = webcam_record(time)
+
+		if record_result == None:
+			text = 'Webcam record failed.\nInfo: {}'.format(return_message)
+			attachment = None
+		else:
+			text = ''
+			if time > LIMIT_VIDEO_LENGTH:
+				text = 'Sorry, we have to limit the record time to {} seconds because of limit of Gmail API in sending email.'.format(LIMIT_VIDEO_LENGTH)
+			attachment = return_message
+
+		response = create_email (
+			sender = auth_email_address,
+			receiver = get_sender_address(email),
+			subject = email['subject'],
+			text = text,
+			attachment_path = attachment
+		)
+
+		if record_result != None:
+			os.remove(return_message)
+
+		send_result = send_email(gmail, 'me', response)
+
+		if send_result == None:
+			raise Exception('Send email failed')
+
+		gui_print('SUCCESS: Webcam Record request email has been executed')
+		
+	except Exception as err:
+		gui_print('FAILED: {} request email execution failed: {}'.format(email['subject'], str(err)))
 
 def prepare_for_listen():
 	try:
@@ -1082,6 +1175,19 @@ def prepare_for_listen():
 			os.remove(TOKEN_FILE)
 		prepare_for_listen()
 
+request_dict = {
+	'SHUTDOWN' : do_shutdown_request,
+	'RESTART' : do_restart_request,
+	'COPY FILE' : do_copy_request,
+	'SCREEN CAPTURE' : do_capture_request,
+	'WEBCAM CAPTURE' : do_webcam_capture_request,
+	'WEBCAM RECORD' : do_webcam_record_request,
+	'LIST PROCESSES' : do_running_process_request,
+	'KILL PROCESS' : do_kill_process_request,
+	'KEYPRESS' : do_catchkeys_request,
+	'REGISTRY KEY' : do_registry_request
+}
+
 def listen():
 	global SCOPES, creds, gmail, auth_email_address
 	try:
@@ -1092,25 +1198,8 @@ def listen():
 		while not stop_listen:
 			email = read_email()[0]
 			if (email != None):
-				subject = email['subject']
-				if subject == 'RESTART':
-					do_restart_request(email)
-				elif subject == 'SHUTDOWN':
-					do_shutdown_request(email)
-				elif subject == 'COPY FILE':
-					do_copy_request(email)
-				elif subject == 'SCREEN CAPTURE':
-					do_capture_request(email)
-				elif subject == 'LIST PROCESSES':
-					do_running_process_request(email)
-				elif subject == 'KILL PROCESS':
-					do_kill_process_request(email)
-				elif subject == 'KEYPRESS':
-					do_catchkeys_request(email)
-				elif subject == 'WEBCAM CAPTURE':
-					do_webcam_capture_request(email)
-				elif subject == 'REGISTRY KEY':
-					do_registry_request(email)
+				request_dict[email['subject']](email)
+				gui_print("Listening...")
 
 	except Exception as err:
 		messagebox.showerror(SOFTWARE_NAME, 'Error while listening: ' + str(err))
@@ -1133,8 +1222,8 @@ def terminate_mainloop():
 		main_window.destroy()
 
 def about_info():
-	message = "PC Remote Control Using Email v1.0\nEmail to receive request email: {}".format(auth_email_address)
-	message = message + "\nDeveloped by Bao-Anh Tran"
+	message = "PC Remote Control Using Email v1.0"
+	message = message + "\nDeveloped by Bao-Anh Tran\nContact via: tranbaoanh.student.hcmus@gmail.com"
 	messagebox.showinfo("About", message)
 
 def how_to_use():
@@ -1150,14 +1239,18 @@ def how_to_use():
 		messagebox.showerror("How to use this software?", message)
 
 def show_window():
+	global hide_or_show, icon
 	main_window.after(0, func = main_window.deiconify)
+	hide_or_show = 'Hide'
+	icon.update_menu()
 
 def system_tray_icon():
-	global icon, pause_or_continue
+	global icon, pause_or_continue, hide_or_show
 	pause_or_continue = 'Pause'
+	hide_or_show = 'Hide'
 	image = Image.open("icon.ico")
 	menu = (
-		pystray.MenuItem('Show', show_window),
+		pystray.MenuItem(lambda text: hide_or_show, show_hide_window),
 		pystray.MenuItem(lambda text: pause_or_continue, pause_listen),
 		pystray.MenuItem('About', about_info),
 		pystray.MenuItem('How to use?', how_to_use),
@@ -1167,7 +1260,18 @@ def system_tray_icon():
 	icon.run()
 
 def hide_window():
+	global hide_or_show, icon
 	main_window.withdraw()
+	hide_or_show = 'Show'
+	icon.update_menu()
+
+def show_hide_window():
+	global icon, hide_or_show
+
+	if hide_or_show == 'Hide':
+		hide_window()
+	elif hide_or_show == 'Show':
+		show_window()
 
 def pause_listen():
 	global stop_listen, btn_pause, pause_or_continue, icon
@@ -1180,8 +1284,7 @@ def pause_listen():
 		gui_print("Paused listening...")
 
 	elif btn_pause['text'] == 'Continue':
-		start_listen = Thread(target = listen, daemon = True)
-		start_listen.start()
+		Thread(target = listen, daemon = True).start()
 		btn_pause['text'] = 'Pause'
 		pause_or_continue = 'Pause'
 		icon.update_menu()
@@ -1193,10 +1296,10 @@ def graphical_UI():
 	main_window = tkinter.Tk()
 	main_window.title(SOFTWARE_NAME)
 	main_window.iconbitmap("icon.ico")
-	main_window.geometry("700x435")
+	main_window.geometry("800x450")
 	main_window.resizable(width=False, height=False)
 
-	txt = Text(main_window)
+	txt = Text(main_window, width=700)
 
 	buttons = Frame(main_window)
 	buttons.pack(side = TOP)
@@ -1204,32 +1307,35 @@ def graphical_UI():
 	btn_pause = Button(buttons, text = "Pause", command = pause_listen)
 	btn_pause.pack(side = LEFT, padx = 5)
 
-	btn_exit = Button(buttons, text="Exit", command = terminate_mainloop)
-	btn_exit.pack(side = LEFT, padx = 5)
-
-	btn_hide = Button(buttons, text = "Hide", command = hide_window)
-	btn_hide.pack(side = LEFT, padx = 5)
+	btn_how_to_use = Button(buttons, text = "How to use?", command = how_to_use)
+	btn_how_to_use.pack(side = LEFT, padx = 5)
 
 	btn_about = Button(buttons, text = "About", command = about_info)
 	btn_about.pack(side = LEFT, padx = 5)
 
-	btn_how_to_use = Button(buttons, text = "How to use?", command = how_to_use)
-	btn_how_to_use.pack(side = LEFT, padx = 5)
+	btn_hide = Button(buttons, text = "Hide", command = hide_window)
+	btn_hide.pack(side = LEFT, padx = 5)
+
+	btn_exit = Button(buttons, text="Exit", command = terminate_mainloop)
+	btn_exit.pack(side = LEFT, padx = 5)
 
 	main_window.protocol('WM_DELETE_WINDOW', hide_window)
 	
 	prepare_for_listen()
 
 	global auth_email_address
-	receiver = Label(main_window, text = "Email to receive request: {}".format(auth_email_address), pady = 10)
+	receiver = Label (
+		master = main_window,
+		text = "Email to receive request: {}".format(auth_email_address)
+	)
+
 	receiver.pack(side = BOTTOM)
 
 	start_listen = Thread(target = listen, daemon = True)
 	start_listen.start()
 	main_window.mainloop()
 
-if __name__ == "__main__":
-	main_ui = Thread(target = graphical_UI)
-	tray_icon = Thread(target = system_tray_icon, daemon = True)
-	main_ui.start()
-	tray_icon.start()
+main_ui = Thread(target = graphical_UI)
+tray_icon = Thread(target = system_tray_icon, daemon = True)
+main_ui.start()
+tray_icon.start()
