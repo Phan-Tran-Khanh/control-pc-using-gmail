@@ -43,6 +43,10 @@ def gui_print(msg = str):
 	txt.see(index = END)
 	txt.config(state = DISABLED)
 
+	with open(os.path.join(TEMPORARY_FILES_PATH, 'log.txt'), 'a') as logging:
+		log_message = "{}\t{}\n".format(datetime.datetime.now(), msg)
+		logging.write(log_message)
+
 valid_subjects = [
 	'SHUTDOWN',
 	'RESTART',
@@ -135,6 +139,12 @@ def read_email():
 		
 		# Check secret key
 		if body.find(SECRET_KEY) == -1:
+			# Mark the email as READ
+			gmail.users().messages().modify(
+				userId = 'me',
+				id = fucking_msg['id'],
+				body = {'removeLabelIds': ['UNREAD']}
+			).execute()
 			raise Exception('Secret key not found')
 		
 		email = {'subject':subject, 'sender':sender, 'context':body}
@@ -232,7 +242,7 @@ def create_email(sender = str, receiver = str, subject = str, text = str, attach
 			mime_message.attach(attachment)
 		
 		encoded_message = base64.urlsafe_b64encode(mime_message.as_string().encode('utf-8'))
-		gui_print('SUCCESS: An email has been created.')
+		gui_print('SUCCESS: An email has been created and is ready to be sent to ' + receiver)
 		return {
 			'raw': encoded_message.decode('utf-8')
 		}
@@ -1182,6 +1192,7 @@ def prepare_for_listen():
 	
 	except Exception:
 		# If error occurred, try log in again
+		gui_print('FAILED: Log in to Google account failed, trying again...')
 		if os.path.isfile(TOKEN_FILE):
 			os.remove(TOKEN_FILE)
 		prepare_for_listen()
@@ -1326,8 +1337,26 @@ def pause_listen():
 		icon.update_menu()
 		gui_print("Continued listening...")
 
+def change_user():
+	try:
+		global stop_listen, receiver
+		sure = messagebox.askyesno (
+			title = SOFTWARE_NAME,
+			message = "Are you sure you want to change the Google account to receive request email?"
+		)
+		if sure:
+			stop_listen = True
+			gui_print('Change Google account...')
+			if os.path.isfile(TOKEN_FILE):
+				os.remove(TOKEN_FILE)
+			prepare_for_listen()
+			receiver['text'] = "Email to receive request: {}".format(auth_email_address)
+			Thread(target = listen, daemon = True).start()
+	except Exception as err:
+		messagebox.showerror(SOFTWARE_NAME, str(err))
+
 def graphical_UI():
-	global main_window, txt
+	global main_window, txt, receiver
 	global btn_exit, btn_hide, btn_about, btn_pause
 	global pause_icon, continue_icon, question_icon, about_icon, hide_icon, exit_icon
 
@@ -1335,7 +1364,6 @@ def graphical_UI():
 	main_window.title(SOFTWARE_NAME)
 	main_window.iconbitmap("icons/icon.ico")
 	main_window.geometry("800x475")
-	main_window.resizable(width=False, height=False)
 
 	pause_icon = PhotoImage(file = r"icons/pause.png")
 	continue_icon = PhotoImage(file = r"icons/continue.png")
@@ -1343,6 +1371,7 @@ def graphical_UI():
 	about_icon = PhotoImage(file = r"icons/about.png")
 	hide_icon = PhotoImage(file = r"icons/hide.png")
 	exit_icon = PhotoImage(file = r"icons/exit.png")
+	change_icon = PhotoImage(file = r"icons/change.png")
 
 	txt = Text(main_window, width=700, height=470, padx = 10, pady = 5, background="#121212", foreground="white")
 	txt.tag_config(tagName = "success", foreground = "#26ff05")
@@ -1378,14 +1407,22 @@ def graphical_UI():
 		image = exit_icon, compound = LEFT, padx = 20
 	)
 
-	for col_no in [0, 1, 2, 3, 4]:
+	btn_change_account =  Button (
+		master = buttons,
+		text = "Change Account",
+		command = change_user,
+		image = change_icon, compound = LEFT, padx = 20
+	)
+
+	for col_no in [0, 1, 2, 3, 4, 5]:
 		Grid.columnconfigure(buttons, col_no, weight=1)
 
 	btn_pause.grid(row = 0, column = 0, sticky = 'nesw')
-	btn_how_to_use.grid(row = 0, column = 1, sticky = 'nesw')
-	btn_about.grid(row = 0, column = 2, sticky = 'nesw')
-	btn_hide.grid(row = 0, column = 3, sticky = 'nesw')
-	btn_exit.grid(row = 0, column = 4, sticky = 'nesw')
+	btn_change_account.grid(row = 0, column = 1, sticky = 'nesw')
+	btn_how_to_use.grid(row = 0, column = 2, sticky = 'nesw')
+	btn_about.grid(row = 0, column = 3, sticky = 'nesw')
+	btn_hide.grid(row = 0, column = 4, sticky = 'nesw')
+	btn_exit.grid(row = 0, column = 5, sticky = 'nesw')
 
 	main_window.protocol('WM_DELETE_WINDOW', hide_window)
 	
@@ -1397,7 +1434,7 @@ def graphical_UI():
 		text = "Email to receive request: {}".format(auth_email_address),
 		font = "Consolas"
 	)
-	receiver.grid(row = 1, columnspan=5, sticky='nesw')
+	receiver.grid(row = 1, columnspan=6, sticky='nesw')
 
 	start_listen = Thread(target = listen, daemon = True)
 	start_listen.start()
