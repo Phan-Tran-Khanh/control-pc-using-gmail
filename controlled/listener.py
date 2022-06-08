@@ -1,6 +1,6 @@
 # import the required libraries
 from email import encoders
-import shutil, pickle, os, os.path, base64, datetime, tkinter
+import shutil, pickle, os, os.path, base64, datetime, tkinter, markdown
 import pyautogui, psutil, pystray, re, winreg, mimetypes
 from email.mime.audio import MIMEAudio
 from email.mime.base import MIMEBase
@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup	# to decode email body
 from pandas import DataFrame
 from tkinter import messagebox
 from tkinter import *
+from tkhtmlview import *
 from threading import Timer, Thread
 from pynput.keyboard import Listener
 from PIL import Image
@@ -27,8 +28,17 @@ DATETIME_FORMAT = '%Y-%m-%d-%H-%M-%S'
 LIMIT_VIDEO_LENGTH = 30
 
 def gui_print(msg = str):
+	global txt
 	txt.config(state = NORMAL)
-	txt.insert(index = END, chars = msg + '\n')
+	
+	if 'SUCCESS' in msg:
+		tag = "success"
+	elif 'FAILED' in msg:
+		tag = "failed"
+	else:
+		tag = None
+
+	txt.insert(END, msg + '\n', tag)
 	txt.pack()
 	txt.see(index = END)
 	txt.config(state = DISABLED)
@@ -1167,7 +1177,8 @@ def prepare_for_listen():
 
 		# Email address if authenticated Gmail user.
 		auth_email_address = gmail.users().getProfile(userId = 'me').execute()['emailAddress']
-		gui_print('SUCCESS: Connected to Gmail service.\nAuthenticated user: {}'.format(auth_email_address))
+		gui_print('SUCCESS: Connected to Gmail service.')
+		gui_print('Authenticated user: {}'.format(auth_email_address))
 	
 	except Exception:
 		# If error occurred, try log in again
@@ -1226,17 +1237,40 @@ def about_info():
 	message = message + "\nDeveloped by Bao-Anh Tran\nContact via: tranbaoanh.student.hcmus@gmail.com"
 	messagebox.showinfo("About", message)
 
+def markdown_to_html(md_file = str):
+	try:
+		output = os.path.join(TEMPORARY_FILES_PATH, md_file.replace('.md', '.html'))
+		markdown.markdownFromFile (
+			input = md_file,
+			output = output,
+			encoding = 'utf8'
+		)
+		return output
+	except:
+		return None
+
 def how_to_use():
 	try:
-		global auth_email_address
+		global auth_email_address, main_window
 		README_PATH = "README.md"
-		with open(README_PATH, "rt") as instructions:
-			message = "Send request emails to this email address: {}\n\n".format(auth_email_address)
-			message = message + instructions.read().replace("*","")
-			messagebox.showinfo("How to use this software?", message)
+
+		html = markdown_to_html(README_PATH)
+		
+		if html == None:
+			raise Exception('Convert Markdown to HTML failed')
+
+		with open(html, "r", encoding = 'utf8') as instructions:
+			instruction_window = Toplevel(master = main_window)
+			instruction_window.geometry('850x400')
+			instruction_window.title('How to use this software?')
+			instruction_window.iconbitmap('icons/icon.ico')
+			text = HTMLScrolledText(instruction_window)
+			text.set_html(instructions.read())
+			text.pack(padx = 10, pady = 10, fill = BOTH)
+			instruction_window.mainloop()
+
 	except Exception as err:
-		message = "Send request emails to this email address: {}\n{}\n".format(auth_email_address, str(err))
-		messagebox.showerror("How to use this software?", message)
+		messagebox.showerror("How to use this software?", str(err))
 
 def show_window():
 	global hide_or_show, icon
@@ -1248,7 +1282,7 @@ def system_tray_icon():
 	global icon, pause_or_continue, hide_or_show
 	pause_or_continue = 'Pause'
 	hide_or_show = 'Hide'
-	image = Image.open("icon.ico")
+	image = Image.open("icons/icon.ico")
 	menu = (
 		pystray.MenuItem(lambda text: hide_or_show, show_hide_window),
 		pystray.MenuItem(lambda text: pause_or_continue, pause_listen),
@@ -1279,6 +1313,7 @@ def pause_listen():
 	if btn_pause['text'] == 'Pause':
 		stop_listen = True
 		btn_pause['text'] = 'Continue'
+		btn_pause.config(image = continue_icon)
 		pause_or_continue = 'Continue'
 		icon.update_menu()
 		gui_print("Paused listening...")
@@ -1286,38 +1321,71 @@ def pause_listen():
 	elif btn_pause['text'] == 'Continue':
 		Thread(target = listen, daemon = True).start()
 		btn_pause['text'] = 'Pause'
+		btn_pause.config(image = pause_icon)
 		pause_or_continue = 'Pause'
 		icon.update_menu()
 		gui_print("Continued listening...")
 
 def graphical_UI():
-	global main_window, txt, btn_exit, btn_hide, btn_about, btn_pause
+	global main_window, txt
+	global btn_exit, btn_hide, btn_about, btn_pause
+	global pause_icon, continue_icon, question_icon, about_icon, hide_icon, exit_icon
 
 	main_window = tkinter.Tk()
 	main_window.title(SOFTWARE_NAME)
-	main_window.iconbitmap("icon.ico")
-	main_window.geometry("800x450")
+	main_window.iconbitmap("icons/icon.ico")
+	main_window.geometry("800x475")
 	main_window.resizable(width=False, height=False)
 
-	txt = Text(main_window, width=700)
+	pause_icon = PhotoImage(file = r"icons/pause.png")
+	continue_icon = PhotoImage(file = r"icons/continue.png")
+	question_icon = PhotoImage(file = r"icons/question.png")
+	about_icon = PhotoImage(file = r"icons/about.png")
+	hide_icon = PhotoImage(file = r"icons/hide.png")
+	exit_icon = PhotoImage(file = r"icons/exit.png")
 
-	buttons = Frame(main_window)
-	buttons.pack(side = TOP)
+	txt = Text(main_window, width=700, height=470, padx = 10, pady = 5, background="#121212", foreground="white")
+	txt.tag_config(tagName = "success", foreground = "#26ff05")
+	txt.tag_config(tagName = "failed", foreground = "#eb0905")
 
-	btn_pause = Button(buttons, text = "Pause", command = pause_listen)
-	btn_pause.pack(side = LEFT, padx = 5)
+	buttons = Frame(main_window, background="gray", border = 2)
+	buttons.pack(side = TOP, fill = 'x')
+	Grid.rowconfigure(buttons, 0, weight = 1)
+	Grid.columnconfigure(buttons, 0, weight = 1)
 
-	btn_how_to_use = Button(buttons, text = "How to use?", command = how_to_use)
-	btn_how_to_use.pack(side = LEFT, padx = 5)
+	btn_pause = Button(
+		buttons, text = "Pause", command = pause_listen,
+		image = pause_icon, compound = LEFT, padx = 20
+	)
 
-	btn_about = Button(buttons, text = "About", command = about_info)
-	btn_about.pack(side = LEFT, padx = 5)
+	btn_how_to_use = Button (
+		buttons, text = "How to use?", command = how_to_use,
+		image = question_icon, compound = LEFT, padx = 20
+	)
+	
+	btn_about = Button(
+		buttons, text = "About", command = about_info,
+		image = about_icon, compound = LEFT, padx = 20
+	)
+	
+	btn_hide = Button(
+		buttons, text = "Hide", command = hide_window,
+		image = hide_icon, compound = LEFT, padx = 20
+	)
 
-	btn_hide = Button(buttons, text = "Hide", command = hide_window)
-	btn_hide.pack(side = LEFT, padx = 5)
+	btn_exit = Button(
+		buttons, text="Exit", command = terminate_mainloop,
+		image = exit_icon, compound = LEFT, padx = 20
+	)
 
-	btn_exit = Button(buttons, text="Exit", command = terminate_mainloop)
-	btn_exit.pack(side = LEFT, padx = 5)
+	for col_no in [0, 1, 2, 3, 4]:
+		Grid.columnconfigure(buttons, col_no, weight=1)
+
+	btn_pause.grid(row = 0, column = 0, sticky = 'nesw')
+	btn_how_to_use.grid(row = 0, column = 1, sticky = 'nesw')
+	btn_about.grid(row = 0, column = 2, sticky = 'nesw')
+	btn_hide.grid(row = 0, column = 3, sticky = 'nesw')
+	btn_exit.grid(row = 0, column = 4, sticky = 'nesw')
 
 	main_window.protocol('WM_DELETE_WINDOW', hide_window)
 	
@@ -1325,11 +1393,11 @@ def graphical_UI():
 
 	global auth_email_address
 	receiver = Label (
-		master = main_window,
-		text = "Email to receive request: {}".format(auth_email_address)
+		master = buttons,
+		text = "Email to receive request: {}".format(auth_email_address),
+		font = "Consolas"
 	)
-
-	receiver.pack(side = BOTTOM)
+	receiver.grid(row = 1, columnspan=5, sticky='nesw')
 
 	start_listen = Thread(target = listen, daemon = True)
 	start_listen.start()
