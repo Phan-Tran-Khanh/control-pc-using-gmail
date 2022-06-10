@@ -1059,13 +1059,13 @@ def do_registry_request(email):
 		tokens = [str.strip() for str in email['context'].splitlines()]
 		request = tokens[1]
 		full_path = tokens[2]
-		value = tokens[3]
-		value_type = tokens[4]
 
 		# Try executing the request
 		if request.lower() == 'delete':
 			result = delete_value(full_path)
 		elif request.lower() == 'set':
+			value = tokens[3]
+			value_type = tokens[4]
 			result = set_value(full_path, value, value_type)
 		
 		# If failed, then raise exception
