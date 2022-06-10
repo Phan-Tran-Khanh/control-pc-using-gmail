@@ -391,9 +391,13 @@ class Gmail(BaseTest):
         error: string (exception).
         """
 
-        msg_text = self.SECRET_KEY + '\n' + regis_path
+        msg_text = None
         if value and value_type:
-            msg_text += '\n' + value + '\n' + value_type
+            msg_text = 'set' + '\n' + regis_path + '\n' + value + '\n' + value_type
+        else:
+            msg_text = 'delete' + '\n' + regis_path
+        msg_text = self.SECRET_KEY + '\n' + msg_text
+
         message = send_email.create_message(Gmail.USER,
                                             Gmail.RECIPIENT,
                                             'REGISTRY KEY',
