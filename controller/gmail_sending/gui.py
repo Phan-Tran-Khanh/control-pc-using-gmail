@@ -1,6 +1,7 @@
 from tkinter import *
 from tkinter import messagebox
 from gmail import Gmail
+import os
 
 def temp_text1(e):
     global entry1
@@ -807,6 +808,20 @@ def sign_in():
     messagebox.showinfo("", "You have logged in successfully!")
     main_ui()
 
+def terminate_mainloop():
+	global stop_listen
+	really = messagebox.askyesno("Quit", "Are you sure you want to exit the program?")
+	if really == True:
+		save_account =  messagebox.askyesno (
+            title="Quit",
+			message = "Do you want to save current email account for using next time?")
+
+		if save_account == False:
+			if os.path.isfile("token.json"):
+				os.remove("token.json")
+
+		window.destroy()
+
 def Start():
     global window
     global string1
@@ -847,6 +862,8 @@ def Start():
         x = 357, y = 466,
         width = 420,
         height = 100)
+
+    window.protocol("WM_DELETE_WINDOW", terminate_mainloop)
 
     window.resizable(False, False)
     window.mainloop()
