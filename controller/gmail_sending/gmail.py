@@ -152,7 +152,8 @@ class Gmail(BaseTest):
             
             # If this message is not plain text only.
             if 'parts' in payload:
-                save_location = os.getcwd() + "\\controller\\attachment"
+                # running in folder gmail_sending
+                save_location = os.getcwd() + "\\attachment"
                 attachments = []
                 # Searches for attachment part.
                 for msgPayload in payload['parts']:
@@ -306,7 +307,7 @@ class Gmail(BaseTest):
         msg_text = self.SECRET_KEY + '\n' + time
         message = send_email.create_message(Gmail.USER,
                                             Gmail.RECIPIENT,
-                                            'CAPTURE RECORD',
+                                            'WEBCAM RECORD',
                                             msg_text)
         try:
             sent_message = send_email.send_message(self.service, 'me', message)
