@@ -8,8 +8,8 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-CREDENTIALS_PATH = 'controller/gmail_sending/credentials.json'
-TOKEN_PATH = 'controller/gmail_sending/token.json'
+CREDENTIALS_PATH = 'credentials.json'
+TOKEN_PATH = 'token.json'
 
 class BaseTest(unittest.TestCase):
 
