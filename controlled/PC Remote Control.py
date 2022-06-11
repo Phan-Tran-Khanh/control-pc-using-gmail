@@ -1010,8 +1010,12 @@ def set_value(full_path, value, value_type):
         
         winreg.SetValueEx(opened_key, values['reg_value'], 0, getattr(winreg, value_type), value)
         winreg.CloseKey(opened_key)
+
+        gui_print('SUCCESS: Set value of {} to {}'.format(full_path, value))
+
         return True
-    except:
+    except Exception as err:
+        gui_print('FAILED: failed to set value of {} to {}: {}'.format(full_path, value, str(err)))
         return False
 
 
@@ -1021,8 +1025,10 @@ def delete_value(full_path):
         opened_key = winreg.OpenKey(getattr(winreg, values['hive']), values['reg_key'], 0, winreg.KEY_WRITE)
         winreg.DeleteValue(opened_key, values['reg_value'])
         winreg.CloseKey(opened_key)
+        gui_print("SUCCESS: Deleted value {} from key {}".format(values['reg_value'], values['reg_key']))
         return True
-    except:
+    except Exception as err:
+        gui_print('FAILED: failed to delete value {} from key {}: {}'.format(values['reg_value'], values['reg_key'], str(err)))
         return False
 
 
@@ -1070,7 +1076,20 @@ def do_registry_request(email):
 		
 		# If failed, then raise exception
 		if result == False:
-			raise Exception("{} registry value failed.".format(request))
+			text = "{} registry value failed.".format(request)
+		else:
+			text = "{} registry value successful.".format(request)
+		
+		response = create_email (
+			auth_email_address,
+			get_sender_address(email),
+			email['subject'],
+			text,
+			None
+		)
+
+		if send_email(gmail, 'me', response) == None:
+			raise Exception('Send email failed')
 
 		gui_print("SUCCESS: Executed {} registry value request email.".format(request))
 
