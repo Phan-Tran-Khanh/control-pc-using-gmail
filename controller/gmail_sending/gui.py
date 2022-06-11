@@ -6,21 +6,25 @@ def temp_text1(e):
     global entry1
     entry1.configure(font=("Times New Roman", "20"), fg="Black")
     entry1.delete(0,"end")
+    entry1.unbind("<FocusIn>")
 
 def temp_text2(e):
     global entry2
     entry2.configure(font=("Times New Roman", "20"), fg="Black")
     entry2.delete(0,"end")
+    entry2.unbind("<FocusIn>")
 
 def temp_text3(e):
     global entry3
     entry3.configure(font=("Times New Roman", "20"), fg="Black")
     entry3.delete(0,"end")
+    entry3.unbind("<FocusIn>")
 
 def temp_text4(e):
     global entry4
     entry4.configure(font=("Times New Roman", "20"), fg="Black")
     entry4.delete(0,"end")
+    entry4.unbind("<FocusIn>")
 
 def cre_btn():
     global stt
