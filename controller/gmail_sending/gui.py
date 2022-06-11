@@ -143,6 +143,7 @@ def send_e():
     global txt_query
     global gmaill
     
+    gmaill.setUpClass()
     gmaill.setUpRecipient(text1)
     if txt_query == "shutdown": gmaill.send_shutdown(text2)
     if txt_query == "restart": gmaill.send_restart(text2)
@@ -811,7 +812,7 @@ def Start():
     global txt_query
     txt_query = ""
     window = Tk()
-    window.geometry("1100x600")
+    window.geometry("1100x600+150+50")
     window.title("Remote")
     window.configure(bg = "#ffffff")
     global canvas
