@@ -1,5 +1,5 @@
 # Control PC Using Gmail
-Remote control personal computer using Gmail API
+Remote control personal computer using Gmail API.
 ## REQUEST format: Subject - Context
 * Shutdown: SHUTDOWN - [time format hh:mm:ss]
 * Restart: RESTART - [time format hh:mm:ss]
